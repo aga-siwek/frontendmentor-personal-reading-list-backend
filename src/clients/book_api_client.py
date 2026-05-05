@@ -11,7 +11,7 @@ def search_books_by_title(title: str, limit: int = 8) -> list:
     response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
         "title": title,
         "limit": limit,
-        "fields": "title,author_name,isbn,cover_i",
+        "fields": "title,author_name,isbn,cover_i,first_publish_year",
     })
     response.raise_for_status()
     docs = response.json().get("docs", [])
@@ -26,7 +26,10 @@ def search_books_by_title(title: str, limit: int = 8) -> list:
             "author": doc.get("author_name", [None])[0],
             "isbn": isbn,
             "cover": _build_covers(cover_i),
+            "first_publish_year": doc.get("first_publish_year"),
         })
+
+    results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
     return results
 
 
