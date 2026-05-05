@@ -13,6 +13,9 @@ class Book(db.Model):
     cover_large = db.Column(db.String(512))
     description = db.Column(db.Text)
     number_of_pages = db.Column(db.Integer)
+    publish_date = db.Column(db.String(64))
+    publisher = db.Column(db.String(256))
+    source_api_id = db.Column(db.String(256))
 
     users = db.relationship("UserBook", back_populates="book")
     categories = db.relationship("Category", secondary=book_category, back_populates="books")
@@ -29,5 +32,8 @@ class Book(db.Model):
             },
             "description": self.description,
             "number_of_pages": self.number_of_pages,
+            "publish_date": self.publish_date,
+            "publisher": self.publisher,
+            "source_api_id": self.source_api_id,
             "categories": [category.to_dict() for category in self.categories],
         }

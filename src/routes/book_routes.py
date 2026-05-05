@@ -21,13 +21,10 @@ def get_book(isbn):
     return book_service.get_book_details(isbn)
 
 
-@book_app.route("/", methods=["POST"])
+@book_app.route("/<string:isbn>/", methods=["POST"])
 @jwt_required()
-def add_book():
-    data = request.get_json()
-    isbn = data.get("isbn", "").strip()
-    if not isbn:
-        return {"error": "isbn is required"}, 400
+def add_book(isbn):
+    data = request.get_json() or {}
     status = data.get("status")
     is_favourite = data.get("is_favourite", False)
     return book_service.add_book(isbn, status, is_favourite)

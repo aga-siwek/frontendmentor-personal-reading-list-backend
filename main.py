@@ -3,6 +3,7 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from src.database import db
 from src.bcrypt import bcrypt
+import src.models
 from src.routes.user_routes import user_app
 from src.routes.book_routes import book_app
 

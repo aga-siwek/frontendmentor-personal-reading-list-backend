@@ -5,7 +5,7 @@ class ReadingGoal(db.Model):
     __tablename__ = "reading_goal"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.user_id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user_reading_list.user_id"), nullable=False)
     year = db.Column(db.Integer, nullable=False)
     goal = db.Column(db.Integer, nullable=False)
 

@@ -14,7 +14,7 @@ class UserBook(db.Model):
     __tablename__ = "user_book"
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.user_id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user_reading_list.user_id"), nullable=False)
     isbn = db.Column(db.String(13), db.ForeignKey("book.isbn"), nullable=False)
     status = db.Column(db.Enum(BookStatus), nullable=False, default=BookStatus.WANT_TO_READ)
     is_favourite = db.Column(db.Boolean, default=False)

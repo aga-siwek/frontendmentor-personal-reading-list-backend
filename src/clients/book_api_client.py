@@ -1,4 +1,5 @@
 import requests
+from typing import Optional
 
 OPEN_LIBRARY_SEARCH_URL = "https://openlibrary.org/search.json"
 OPEN_LIBRARY_BOOKS_URL = "https://openlibrary.org/api/books"
@@ -6,7 +7,7 @@ OPEN_LIBRARY_COVERS_URL = "https://covers.openlibrary.org/b/id"
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 
 
-def search_books_by_title(title: str, limit: int = 8) -> list[dict]:
+def search_books_by_title(title: str, limit: int = 8) -> list:
     response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
         "title": title,
         "limit": limit,
@@ -39,13 +40,10 @@ def get_book_details(isbn: str) -> dict:
     response.raise_for_status()
     data = response.json().get(bibkey, {})
 
-    cover_id = None
     covers = data.get("cover", {})
-    if covers.get("small"):
-        cover_id = covers["small"].split("/")[-1].replace("-S.jpg", "")
-
     google_data = _fetch_google_data(isbn)
     authors = data.get("authors", [])
+    publishers = data.get("publishers", [])
     return {
         "isbn": isbn,
         "title": data.get("title"),
@@ -58,6 +56,9 @@ def get_book_details(isbn: str) -> dict:
         "description": google_data["description"],
         "categories": google_data["categories"],
         "number_of_pages": data.get("number_of_pages"),
+        "publish_date": data.get("publish_date"),
+        "publisher": publishers[0]["name"] if publishers else None,
+        "source_api_id": data.get("key"),
     }
 
 
@@ -77,7 +78,7 @@ def _fetch_google_data(isbn: str) -> dict:
     return {"description": None, "categories": []}
 
 
-def _build_covers(cover_i: int | None) -> dict:
+def _build_covers(cover_i: Optional[int]) -> dict:
     if not cover_i:
         return {"small": None, "medium": None, "large": None}
     return {

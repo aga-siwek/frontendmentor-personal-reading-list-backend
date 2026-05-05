@@ -14,36 +14,42 @@ def search_books(title: str):
 
 
 def get_book_details(isbn: str):
+    user_id = get_jwt_identity()
+
     book = Book.query.get(isbn)
-    if book:
-        return jsonify(book.to_dict()), 200
+    if not book:
+        data = book_api_client.get_book_details(isbn)
+        if not data.get("title"):
+            return jsonify({"error": "Book not found"}), 404
 
-    data = book_api_client.get_book_details(isbn)
-    if not data.get("title"):
-        return jsonify({"error": "Book not found"}), 404
+        cover = data.get("cover", {})
+        book = Book(
+            isbn=isbn,
+            title=data["title"],
+            author=data.get("author"),
+            cover_small=cover.get("small"),
+            cover_medium=cover.get("medium"),
+            cover_large=cover.get("large"),
+            description=data.get("description"),
+            number_of_pages=data.get("number_of_pages"),
+            publish_date=data.get("publish_date"),
+            publisher=data.get("publisher"),
+            source_api_id=data.get("source_api_id"),
+        )
+        for name in data.get("categories", []):
+            category = Category.query.filter_by(name=name).first()
+            if not category:
+                category = Category(name=name)
+                db.session.add(category)
+            book.categories.append(category)
+        db.session.add(book)
+        db.session.commit()
 
-    cover = data.get("cover", {})
-    book = Book(
-        isbn=isbn,
-        title=data["title"],
-        author=data.get("author"),
-        cover_small=cover.get("small"),
-        cover_medium=cover.get("medium"),
-        cover_large=cover.get("large"),
-        description=data.get("description"),
-        number_of_pages=data.get("number_of_pages"),
-    )
-    for name in data.get("categories", []):
-        category = Category.query.filter_by(name=name).first()
-        if not category:
-            category = Category(name=name)
-            db.session.add(category)
-        book.categories.append(category)
-    db.session.add(book)
-    db.session.commit()
+    user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
+    response = book.to_dict()
+    response["user_book"] = user_book.to_dict() if user_book else None
 
-    return jsonify(book.to_dict()), 200
-
+    return jsonify(response), 200
 
 
 def add_book(isbn: str, status: str, is_favourite: bool = False):
@@ -56,7 +62,6 @@ def add_book(isbn: str, status: str, is_favourite: bool = False):
     book = Book.query.get(isbn)
     if not book:
         return jsonify({"error": "Book not found. Fetch book details first."}), 404
-
     try:
         book_status = BookStatus(status) if status else BookStatus.WANT_TO_READ
     except ValueError:
