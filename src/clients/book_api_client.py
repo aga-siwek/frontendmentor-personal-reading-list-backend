@@ -8,18 +8,68 @@ GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 
 
 def search_books_by_title(title: str, limit: int = 8) -> list:
+    try:
+        response = requests.get(GOOGLE_BOOKS_URL, params={
+            "q": f"intitle:{title}",
+            "maxResults": 40,
+            "printType": "books",
+            "langRestrict": "en",
+        }, timeout=10)
+        response.raise_for_status()
+        items = response.json().get("items", [])
+
+        seen_isbns = set()
+        results = []
+        for item in items:
+            volume_info = item.get("volumeInfo", {})
+            identifiers = volume_info.get("industryIdentifiers", [])
+            isbn = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), None)
+            if not isbn:
+                isbn = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_10"), None)
+            if not isbn or isbn in seen_isbns:
+                continue
+            if volume_info.get("language") != "en":
+                continue
+            seen_isbns.add(isbn)
+            image_links = volume_info.get("imageLinks", {})
+            published_date = volume_info.get("publishedDate", "")
+            year = int(published_date[:4]) if published_date and published_date[:4].isdigit() else None
+            results.append({
+                "title": volume_info.get("title"),
+                "author": volume_info.get("authors", [None])[0],
+                "isbn": isbn,
+                "cover": {
+                    "small": image_links.get("smallThumbnail"),
+                    "medium": image_links.get("thumbnail"),
+                    "large": image_links.get("large"),
+                },
+                "first_publish_year": year,
+            })
+
+        results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
+        return results[:limit]
+    except requests.RequestException:
+        return _search_open_library(title, limit)
+
+
+def _search_open_library(title: str, limit: int) -> list:
     response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
         "title": title,
         "limit": limit,
         "fields": "title,author_name,isbn,cover_i,first_publish_year",
-    })
+        "language": "eng",
+    }, timeout=10)
     response.raise_for_status()
     docs = response.json().get("docs", [])
 
+    seen_isbns = set()
     results = []
     for doc in docs:
         isbns = doc.get("isbn", [])
         isbn = next((i for i in isbns if len(i) == 13), isbns[0] if isbns else None)
+        if not isbn or isbn in seen_isbns:
+            continue
+        seen_isbns.add(isbn)
         cover_i = doc.get("cover_i")
         results.append({
             "title": doc.get("title"),

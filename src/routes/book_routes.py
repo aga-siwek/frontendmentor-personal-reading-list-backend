@@ -5,7 +5,6 @@ from src.services import book_service
 
 book_app = Blueprint("books", __name__, url_prefix="/books")
 
-
 @book_app.route("/search/", methods=["GET"])
 @jwt_required()
 def search_book():
