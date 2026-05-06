@@ -19,6 +19,7 @@ class UserBook(db.Model):
     status = db.Column(db.Enum(BookStatus), nullable=False, default=BookStatus.WANT_TO_READ)
     is_favourite = db.Column(db.Boolean, default=False)
     current_page = db.Column(db.Integer, default=0)
+    notes = db.Column(db.Text)
 
     user = db.relationship("User", back_populates="books")
     book = db.relationship("Book", back_populates="users")
@@ -30,4 +31,5 @@ class UserBook(db.Model):
             "status": self.status.value,
             "is_favourite": self.is_favourite,
             "current_page": self.current_page,
+            "notes": self.notes,
         }

@@ -14,6 +14,26 @@ def search_book():
     return book_service.search_books(title)
 
 
+# for admin
+@book_app.route("/", methods=["GET"])
+@jwt_required()
+def get_all_user_books():
+    return book_service.get_all_user_books()
+
+
+# for admin
+@book_app.route("/users/<int:user_id>/", methods=["GET"])
+@jwt_required()
+def get_user_books(user_id):
+    return book_service.get_user_books(user_id)
+
+
+@book_app.route("/me/", methods=["GET"])
+@jwt_required()
+def get_me_books():
+    return book_service.get_me_books()
+
+
 @book_app.route("/<string:isbn>/", methods=["GET"])
 @jwt_required()
 def get_book(isbn):
@@ -26,4 +46,12 @@ def add_book(isbn):
     data = request.get_json() or {}
     status = data.get("status")
     is_favourite = data.get("is_favourite", False)
-    return book_service.add_book(isbn, status, is_favourite)
+    notes = data.get("notes")
+    return book_service.add_book(isbn, status, is_favourite, notes)
+
+
+@book_app.route("/<string:isbn>/", methods=["PATCH"])
+@jwt_required()
+def update_book(isbn):
+    data = request.get_json() or {}
+    return book_service.update_user_book(isbn, data)

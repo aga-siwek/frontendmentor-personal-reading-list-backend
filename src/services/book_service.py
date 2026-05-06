@@ -5,7 +5,46 @@ from src.clients import book_api_client
 from src.database import db
 from src.models.book import Book
 from src.models.category import Category
+from src.models.user import User
 from src.models.user_book import UserBook, BookStatus
+
+
+def _get_current_user():
+    return User.query.filter_by(user_id=int(get_jwt_identity())).first()
+
+
+def _user_book_to_dict(user_book: UserBook) -> dict:
+    data = user_book.book.to_dict()
+    data["user_book"] = user_book.to_dict()
+    return data
+
+
+def get_all_user_books():
+    logged_user = _get_current_user()
+    if not logged_user:
+        return jsonify({"error": "User not found"}), 404
+    if not logged_user.is_administrator():
+        return jsonify({"error": "Unauthorized"}), 401
+    user_books = UserBook.query.all()
+    return jsonify([_user_book_to_dict(ub) for ub in user_books]), 200
+
+
+def get_user_books(user_id: int):
+    logged_user = _get_current_user()
+    if not logged_user:
+        return jsonify({"error": "User not found"}), 404
+    if not logged_user.is_administrator():
+        return jsonify({"error": "Unauthorized"}), 401
+    user_books = UserBook.query.filter_by(user_id=user_id).all()
+    return jsonify([_user_book_to_dict(ub) for ub in user_books]), 200
+
+
+def get_me_books():
+    logged_user = _get_current_user()
+    if not logged_user:
+        return jsonify({"error": "User not found"}), 404
+    user_books = UserBook.query.filter_by(user_id=logged_user.user_id).all()
+    return jsonify([_user_book_to_dict(ub) for ub in user_books]), 200
 
 
 def search_books(title: str):
@@ -52,7 +91,7 @@ def get_book_details(isbn: str):
     return jsonify(response), 200
 
 
-def add_book(isbn: str, status: str, is_favourite: bool = False):
+def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = None):
     user_id = get_jwt_identity()
 
     existing_user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
@@ -80,8 +119,31 @@ def add_book(isbn: str, status: str, is_favourite: bool = False):
         status=book_status,
         is_favourite=is_favourite,
         current_page=current_page,
+        notes=notes,
     )
     db.session.add(user_book)
     db.session.commit()
 
     return jsonify(user_book.to_dict()), 201
+
+
+def update_user_book(isbn: str, data: dict):
+    user_id = int(get_jwt_identity())
+    user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
+    if not user_book:
+        return jsonify({"error": "Book not on your list"}), 404
+
+    if "status" in data:
+        try:
+            user_book.status = BookStatus(data["status"])
+        except ValueError:
+            return jsonify({"error": f"Invalid status. Valid values: {[s.value for s in BookStatus]}"}), 400
+    if "is_favourite" in data:
+        user_book.is_favourite = data["is_favourite"]
+    if "current_page" in data:
+        user_book.current_page = data["current_page"]
+    if "notes" in data:
+        user_book.notes = data["notes"]
+
+    db.session.commit()
+    return jsonify(user_book.to_dict()), 200
