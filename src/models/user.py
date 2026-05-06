@@ -21,5 +21,5 @@ class User(db.Model):
         }
 
     def is_administrator(self):
-        return self.is_admin == 1
+        return bool(self.is_admin)
 

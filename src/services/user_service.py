@@ -9,7 +9,7 @@ from src.models.user import User
 def create_user(user_email: str, user_password: str, is_admin: bool):
     user = User.query.filter_by(user_email=user_email).first()
     if user is not None:
-        return jsonify({"description": f"user '{user_email}' already exists in database"}), 409
+        return jsonify({"error": f"user '{user_email}' already exists in database"}), 409
 
     hashed_password = bcrypt.generate_password_hash(user_password).decode()
     new_user = User(
@@ -32,20 +32,19 @@ def login(user_email: str, user_password: str):
             "user_name": user.user_name,
             "user_email": user.user_email,
         })
-    return jsonify({"description": "Access Denied: bad login or password"}), 401
+    return jsonify({"error": "Access Denied: bad login or password"}), 401
 
 
 def _get_current_user():
-    current_user_id = get_jwt_identity()
-    return User.query.filter_by(user_id=current_user_id).first()
+    return User.query.filter_by(user_id=int(get_jwt_identity())).first()
 
 
 def get_all_users():
     logged_user = _get_current_user()
     if not logged_user:
-        return jsonify({"description": "user not found"}), 404
+        return jsonify({"error": "user not found"}), 404
     if not logged_user.is_administrator():
-        return jsonify({"description": "Unauthorized"}), 401
+        return jsonify({"error": "Unauthorized"}), 401
     users = User.query.all()
     return jsonify([user.to_dict() for user in users]), 200
 
@@ -53,31 +52,31 @@ def get_all_users():
 def get_single_user(user_id):
     logged_user = _get_current_user()
     if not logged_user:
-        return jsonify({"description": "user not found"}), 404
+        return jsonify({"error": "user not found"}), 404
     if not logged_user.is_administrator():
-        return jsonify({"description": "Unauthorized"}), 401
+        return jsonify({"error": "Unauthorized"}), 401
     checked_user = User.query.get(user_id)
     if checked_user is None:
-        return jsonify({"description": "User not found"}), 404
+        return jsonify({"error": "User not found"}), 404
     return jsonify(checked_user.to_dict()), 200
 
 
 def get_me_user():
     logged_user = _get_current_user()
     if not logged_user:
-        return jsonify({"description": "user not found"}), 404
+        return jsonify({"error": "user not found"}), 404
     return jsonify(logged_user.to_dict()), 200
 
 
 def change_single_user(data, user_id):
     logged_user = _get_current_user()
     if not logged_user:
-        return jsonify({"description": "user not found"}), 404
+        return jsonify({"error": "user not found"}), 404
     if not logged_user.is_administrator():
-        return jsonify({"description": "Unauthorized"}), 401
+        return jsonify({"error": "Unauthorized"}), 401
     changed_user = User.query.get(user_id)
     if changed_user is None:
-        return jsonify({"description": "User not found"}), 404
+        return jsonify({"error": "User not found"}), 404
 
     if "user_email" in data:
         changed_user.user_email = data["user_email"]
@@ -93,7 +92,7 @@ def change_single_user(data, user_id):
 def change_me_user(data):
     logged_user = _get_current_user()
     if not logged_user:
-        return jsonify({"description": "user not found"}), 404
+        return jsonify({"error": "user not found"}), 404
 
     if "user_email" in data:
         logged_user.user_email = data["user_email"]
@@ -109,21 +108,21 @@ def change_me_user(data):
 def delete_single_user(user_id):
     logged_user = _get_current_user()
     if not logged_user:
-        return jsonify({"description": "user not found"}), 404
+        return jsonify({"error": "user not found"}), 404
     if not logged_user.is_administrator():
-        return jsonify({"description": "Unauthorized"}), 401
+        return jsonify({"error": "Unauthorized"}), 401
     deleted_user = User.query.get(user_id)
     if deleted_user is None:
-        return jsonify({"description": "User not found"}), 404
+        return jsonify({"error": "User not found"}), 404
     db.session.delete(deleted_user)
     db.session.commit()
-    return jsonify({"description": f"user {user_id} deleted"}), 200
+    return jsonify({"error": f"user {user_id} deleted"}), 200
 
 
 def delete_me_user():
     logged_user = _get_current_user()
     if not logged_user:
-        return jsonify({"description": "user not found"}), 404
+        return jsonify({"error": "user not found"}), 404
     db.session.delete(logged_user)
     db.session.commit()
-    return jsonify({"description": "account deleted"}), 200
+    return jsonify({"error": "account deleted"}), 200

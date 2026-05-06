@@ -57,7 +57,7 @@ def search_books(title: str):
 
 
 def get_book_details(isbn: str):
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
 
     book = Book.query.get(isbn)
     if not book:
@@ -88,7 +88,7 @@ def get_book_details(isbn: str):
         db.session.add(book)
         db.session.commit()
 
-    user_book = UserBook.query.filter_by(user_id=int(user_id), isbn=isbn).first()
+    user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
     response = book.to_dict()
     if user_book:
         user_book_dict = user_book.to_dict()
@@ -102,8 +102,7 @@ def get_book_details(isbn: str):
 
 
 def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = None):
-    user_id = get_jwt_identity()
-
+    user_id = int(get_jwt_identity())
     existing_user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
     if existing_user_book:
         return jsonify({"error": "Book already on your list"}), 409
