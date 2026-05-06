@@ -55,3 +55,16 @@ def add_book(isbn):
 def update_book(isbn):
     data = request.get_json() or {}
     return book_service.update_user_book(isbn, data)
+
+
+@book_app.route("/<string:isbn>/progress/", methods=["POST"])
+@jwt_required()
+def add_progress(isbn):
+    data = request.get_json() or {}
+    return book_service.add_reading_progress(isbn, data)
+
+
+@book_app.route("/<string:isbn>/progress/", methods=["GET"])
+@jwt_required()
+def get_progress(isbn):
+    return book_service.get_reading_progress(isbn)

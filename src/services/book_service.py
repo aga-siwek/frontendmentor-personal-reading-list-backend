@@ -7,6 +7,7 @@ from src.models.book import Book
 from src.models.category import Category
 from src.models.user import User
 from src.models.user_book import UserBook, BookStatus
+from src.models.reading_progress import ReadingProgress
 
 
 def _get_current_user():
@@ -125,6 +126,31 @@ def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = No
     db.session.commit()
 
     return jsonify(user_book.to_dict()), 201
+
+
+def add_reading_progress(isbn: str, data: dict):
+    user_id = int(get_jwt_identity())
+    user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
+    if not user_book:
+        return jsonify({"error": "Book not on your list"}), 404
+    current_page = data.get("current_page")
+    if current_page is None:
+        return jsonify({"error": "current_page is required"}), 400
+
+    progress = ReadingProgress(user_id=user_id, isbn=isbn, current_page=current_page)
+    user_book.current_page = current_page
+    db.session.add(progress)
+    db.session.commit()
+    return jsonify(progress.to_dict()), 201
+
+
+def get_reading_progress(isbn: str):
+    user_id = int(get_jwt_identity())
+    user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
+    if not user_book:
+        return jsonify({"error": "Book not on your list"}), 404
+    progress = ReadingProgress.query.filter_by(user_id=user_id, isbn=isbn).order_by(ReadingProgress.date).all()
+    return jsonify([p.to_dict() for p in progress]), 200
 
 
 def update_user_book(isbn: str, data: dict):
