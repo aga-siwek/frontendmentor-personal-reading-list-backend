@@ -15,8 +15,11 @@ def _get_current_user():
 
 
 def _user_book_to_dict(user_book: UserBook) -> dict:
-    data = user_book.book.to_dict()
-    data["user_book"] = user_book.to_dict()
+    data = user_book.book.to_dict() if user_book.book else {}
+    user_book_dict = user_book.to_dict()
+    total_pages = user_book.book.number_of_pages if user_book.book else None
+    user_book_dict["percentage"] = round(user_book.current_page / total_pages * 100, 1) if total_pages else None
+    data["user_book"] = user_book_dict
     return data
 
 
@@ -85,9 +88,15 @@ def get_book_details(isbn: str):
         db.session.add(book)
         db.session.commit()
 
-    user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
+    user_book = UserBook.query.filter_by(user_id=int(user_id), isbn=isbn).first()
     response = book.to_dict()
-    response["user_book"] = user_book.to_dict() if user_book else None
+    if user_book:
+        user_book_dict = user_book.to_dict()
+        total_pages = book.number_of_pages
+        user_book_dict["percentage"] = round(user_book.current_page / total_pages * 100, 1) if total_pages else None
+        response["user_book"] = user_book_dict
+    else:
+        response["user_book"] = None
 
     return jsonify(response), 200
 
