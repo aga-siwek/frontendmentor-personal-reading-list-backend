@@ -1,4 +1,5 @@
 import enum
+from datetime import datetime
 from src.database import db
 
 
@@ -20,6 +21,8 @@ class UserBook(db.Model):
     is_favourite = db.Column(db.Boolean, default=False)
     current_page = db.Column(db.Integer, default=0)
     notes = db.Column(db.Text)
+    rating = db.Column(db.Integer, db.CheckConstraint("rating >= 1 AND rating <= 5"))
+    last_updated = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship("User", back_populates="books")
     book = db.relationship("Book", back_populates="users")
@@ -32,4 +35,6 @@ class UserBook(db.Model):
             "is_favourite": self.is_favourite,
             "current_page": self.current_page,
             "notes": self.notes,
+            "rating": self.rating,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
         }

@@ -101,7 +101,7 @@ def get_book_details(isbn: str):
     return jsonify(response), 200
 
 
-def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = None):
+def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = None, rating: int = None):
     user_id = int(get_jwt_identity())
     existing_user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
     if existing_user_book:
@@ -129,6 +129,7 @@ def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = No
         is_favourite=is_favourite,
         current_page=current_page,
         notes=notes,
+        rating=rating,
     )
     db.session.add(user_book)
     db.session.commit()
@@ -147,6 +148,12 @@ def add_reading_progress(isbn: str, data: dict):
 
     progress = ReadingProgress(user_id=user_id, isbn=isbn, current_page=current_page)
     user_book.current_page = current_page
+    user_book.last_updated = progress.date
+    total_pages = user_book.book.number_of_pages if user_book.book else None
+    if total_pages and current_page >= total_pages:
+        user_book.status = BookStatus.FINISHED
+    elif user_book.status == BookStatus.WANT_TO_READ and current_page > 0:
+        user_book.status = BookStatus.CURRENTLY_READING
     db.session.add(progress)
     db.session.commit()
     return jsonify(progress.to_dict()), 201
@@ -169,7 +176,13 @@ def update_user_book(isbn: str, data: dict):
 
     if "status" in data:
         try:
-            user_book.status = BookStatus(data["status"])
+            from datetime import datetime
+            new_status = BookStatus(data["status"])
+            user_book.status = new_status
+            if new_status == BookStatus.FINISHED:
+                user_book.last_updated = datetime.utcnow()
+                if user_book.book and user_book.book.number_of_pages:
+                    user_book.current_page = user_book.book.number_of_pages
         except ValueError:
             return jsonify({"error": f"Invalid status. Valid values: {[s.value for s in BookStatus]}"}), 400
     if "is_favourite" in data:
@@ -178,6 +191,8 @@ def update_user_book(isbn: str, data: dict):
         user_book.current_page = data["current_page"]
     if "notes" in data:
         user_book.notes = data["notes"]
+    if "rating" in data:
+        user_book.rating = data["rating"]
 
     db.session.commit()
     return jsonify(user_book.to_dict()), 200

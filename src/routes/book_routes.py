@@ -47,7 +47,8 @@ def add_book(isbn):
     status = data.get("status")
     is_favourite = data.get("is_favourite", False)
     notes = data.get("notes")
-    return book_service.add_book(isbn, status, is_favourite, notes)
+    rating = data.get("rating")
+    return book_service.add_book(isbn, status, is_favourite, notes, rating)
 
 
 @book_app.route("/<string:isbn>/", methods=["PATCH"])

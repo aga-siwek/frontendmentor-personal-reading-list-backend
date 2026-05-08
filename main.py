@@ -7,6 +7,7 @@ import src.models
 from src.routes.user_routes import user_app
 from src.routes.book_routes import book_app
 from src.routes.shelf_routes import shelf_app
+from src.routes.goal_routes import goal_app
 
 
 
@@ -14,6 +15,7 @@ app = Flask(__name__)
 app.register_blueprint(book_app)
 app.register_blueprint(user_app)
 app.register_blueprint(shelf_app)
+app.register_blueprint(goal_app)
 app.config.from_object("src.config.Config")
 db.init_app(app)
 bcrypt.init_app(app)
