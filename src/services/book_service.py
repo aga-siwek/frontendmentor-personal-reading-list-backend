@@ -146,10 +146,12 @@ def add_reading_progress(isbn: str, data: dict):
     if current_page is None:
         return jsonify({"error": "current_page is required"}), 400
 
+    total_pages = user_book.book.number_of_pages if user_book.book else None
+    if total_pages and current_page > total_pages:
+        current_page = total_pages
     progress = ReadingProgress(user_id=user_id, isbn=isbn, current_page=current_page)
     user_book.current_page = current_page
     user_book.last_updated = progress.date
-    total_pages = user_book.book.number_of_pages if user_book.book else None
     if total_pages and current_page >= total_pages:
         user_book.status = BookStatus.FINISHED
     elif user_book.status == BookStatus.WANT_TO_READ and current_page > 0:
