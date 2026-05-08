@@ -1,3 +1,4 @@
+from datetime import datetime
 from flask import jsonify
 from flask_jwt_extended import get_jwt_identity
 
@@ -115,12 +116,13 @@ def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = No
     except ValueError:
         return jsonify({"error": f"Invalid status. Valid values: {[s.value for s in BookStatus]}"}), 400
 
-    if book_status == BookStatus.WANT_TO_READ:
-        current_page = 0
-    elif book_status == BookStatus.FINISHED:
+    from datetime import datetime
+    if book_status == BookStatus.FINISHED:
         current_page = book.number_of_pages or 0
+        last_updated = datetime.utcnow()
     else:
         current_page = 0
+        last_updated = None
 
     user_book = UserBook(
         user_id=user_id,
@@ -130,6 +132,7 @@ def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = No
         current_page=current_page,
         notes=notes,
         rating=rating,
+        last_updated=last_updated,
     )
     db.session.add(user_book)
     db.session.commit()
@@ -178,7 +181,7 @@ def update_user_book(isbn: str, data: dict):
 
     if "status" in data:
         try:
-            from datetime import datetime
+    
             new_status = BookStatus(data["status"])
             user_book.status = new_status
             if new_status == BookStatus.FINISHED:
@@ -190,7 +193,8 @@ def update_user_book(isbn: str, data: dict):
     if "is_favourite" in data:
         user_book.is_favourite = data["is_favourite"]
     if "current_page" in data:
-        user_book.current_page = data["current_page"]
+        total_pages = user_book.book.number_of_pages if user_book.book else None
+        user_book.current_page = min(data["current_page"], total_pages) if total_pages else data["current_page"]
     if "notes" in data:
         user_book.notes = data["notes"]
     if "rating" in data:
