@@ -7,10 +7,16 @@ OPEN_LIBRARY_COVERS_URL = "https://covers.openlibrary.org/b/id"
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 
 
-def search_books_by_title(title: str, limit: int = 8) -> list:
+def _is_isbn(query: str) -> bool:
+    stripped = query.replace("-", "").replace(" ", "")
+    return stripped.isdigit() and len(stripped) in (10, 13)
+
+
+def search_books(query: str, limit: int = 8) -> list:
     try:
+        q = f"isbn:{query}" if _is_isbn(query) else query
         response = requests.get(GOOGLE_BOOKS_URL, params={
-            "q": f"intitle:{title}",
+            "q": q,
             "maxResults": 40,
             "printType": "books",
             "langRestrict": "en",
@@ -49,12 +55,15 @@ def search_books_by_title(title: str, limit: int = 8) -> list:
         results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
         return results[:limit]
     except requests.RequestException:
-        return _search_open_library(title, limit)
+        return _search_open_library(query, limit)
 
 
-def _search_open_library(title: str, limit: int) -> list:
+def _search_open_library(query: str, limit: int) -> list:
+    if _is_isbn(query):
+        details = get_book_details(query.replace("-", "").replace(" ", ""))
+        return [details] if details.get("title") else []
     response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
-        "title": title,
+        "q": query,
         "limit": limit,
         "fields": "title,author_name,isbn,cover_i,first_publish_year",
         "language": "eng",

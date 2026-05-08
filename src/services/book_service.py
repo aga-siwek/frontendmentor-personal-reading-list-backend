@@ -51,8 +51,8 @@ def get_me_books():
     return jsonify([_user_book_to_dict(ub) for ub in user_books]), 200
 
 
-def search_books(title: str):
-    results = book_api_client.search_books_by_title(title)
+def search_books(query: str):
+    results = book_api_client.search_books(query)
     return jsonify(results), 200
 
 

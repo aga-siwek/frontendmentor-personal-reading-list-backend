@@ -8,9 +8,9 @@ book_app = Blueprint("books", __name__, url_prefix="/books")
 @book_app.route("/search/", methods=["GET"])
 @jwt_required()
 def search_book():
-    title = request.args.get("title", "").strip()
+    title = request.args.get("q", "").strip()
     if not title:
-        return {"error": "title query parameter is required"}, 400
+        return {"error": "q query parameter is required"}, 400
     return book_service.search_books(title)
 
 
