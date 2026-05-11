@@ -40,13 +40,13 @@ def me_user():
     return user_service.get_me_user()
 
 
-@user_app.put("/<int:user_id>/")
+@user_app.patch("/<int:user_id>/")
 @jwt_required()
 def change_single_user(user_id):
     return user_service.change_single_user(request.get_json(), user_id)
 
 
-@user_app.put("/me/")
+@user_app.patch("/me/")
 @jwt_required()
 def change_me_user():
     return user_service.change_me_user(request.get_json())

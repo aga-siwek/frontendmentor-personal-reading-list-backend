@@ -91,13 +91,7 @@ def get_book_details(isbn: str):
 
     user_book = UserBook.query.filter_by(user_id=user_id, isbn=isbn).first()
     response = book.to_dict()
-    if user_book:
-        user_book_dict = user_book.to_dict()
-        total_pages = book.number_of_pages
-        user_book_dict["percentage"] = round(user_book.current_page / total_pages * 100, 1) if total_pages else None
-        response["user_book"] = user_book_dict
-    else:
-        response["user_book"] = None
+    response["user_book"] = _user_book_to_dict(user_book)["user_book"] if user_book else None
 
     return jsonify(response), 200
 
@@ -116,7 +110,6 @@ def add_book(isbn: str, status: str, is_favourite: bool = False, notes: str = No
     except ValueError:
         return jsonify({"error": f"Invalid status. Valid values: {[s.value for s in BookStatus]}"}), 400
 
-    from datetime import datetime
     if book_status == BookStatus.FINISHED:
         current_page = book.number_of_pages or 0
         last_updated = datetime.utcnow()
@@ -181,7 +174,6 @@ def update_user_book(isbn: str, data: dict):
 
     if "status" in data:
         try:
-    
             new_status = BookStatus(data["status"])
             user_book.status = new_status
             if new_status == BookStatus.FINISHED:
