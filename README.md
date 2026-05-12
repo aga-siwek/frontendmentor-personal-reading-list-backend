@@ -22,15 +22,49 @@ A RESTful API backend for a personal reading list application. Built with Flask 
 - **Google Books API** — primary book data source
 - **Open Library API** — fallback book data source
 - **pytest** — testing
+- **Docker** — containerization
+- **Gunicorn** — production WSGI server
 
 ## Getting Started
 
-### Prerequisites
+### Option 1 — Docker (recommended)
 
-- Python 3.9+
-- PostgreSQL database
+The easiest way to run the project. No need to install Python, PostgreSQL, or any libraries.
 
-### Installation
+**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+
+```bash
+git clone <repo-url>
+cd frontendmentor-personal-reading-list
+```
+
+Create a `.env` file from the provided template:
+
+```bash
+cp .env.example .env
+```
+
+Fill in your values in `.env`.
+
+Start the application and database:
+
+```bash
+docker-compose up --build
+```
+
+The server will start at `http://localhost:5000`.
+
+To stop:
+
+```bash
+docker-compose down
+```
+
+---
+
+### Option 2 — Local Setup
+
+**Prerequisites:** Python 3.9+, PostgreSQL
 
 ```bash
 git clone <repo-url>
@@ -40,8 +74,6 @@ source venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### Environment Variables
-
 Create a `.env` file in the project root:
 
 ```env
@@ -50,13 +82,13 @@ SECRET_KEY=your-secret-key
 JWT_SECRET_KEY=your-jwt-secret-key
 ```
 
-### Running the App
-
 ```bash
 python main.py
 ```
 
 The server will start at `http://localhost:5000`.
+
+---
 
 ### Running Tests
 
