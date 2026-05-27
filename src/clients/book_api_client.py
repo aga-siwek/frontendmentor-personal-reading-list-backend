@@ -1,3 +1,4 @@
+import os
 import requests
 from typing import Optional
 
@@ -6,6 +7,9 @@ OPEN_LIBRARY_BOOKS_URL = "https://openlibrary.org/api/books"
 OPEN_LIBRARY_COVERS_URL = "https://covers.openlibrary.org/b/id"
 GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 
+OPEN_LIBRARY_HEADERS = {"User-Agent": "PersonalReadingList/1.0 (personal project)"}
+GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY")
+
 
 def _is_isbn(query: str) -> bool:
     stripped = query.replace("-", "").replace(" ", "")
@@ -13,62 +17,26 @@ def _is_isbn(query: str) -> bool:
 
 
 def search_books(query: str, limit: int = 8) -> list:
-    try:
-        q = f"isbn:{query}" if _is_isbn(query) else query
-        response = requests.get(GOOGLE_BOOKS_URL, params={
-            "q": q,
-            "maxResults": 40,
-            "printType": "books",
-            "langRestrict": "en",
-        }, timeout=10)
-        response.raise_for_status()
-        items = response.json().get("items", [])
-
-        seen_isbns = set()
-        results = []
-        for item in items:
-            volume_info = item.get("volumeInfo", {})
-            identifiers = volume_info.get("industryIdentifiers", [])
-            isbn = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), None)
-            if not isbn:
-                isbn = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_10"), None)
-            if not isbn or isbn in seen_isbns:
-                continue
-            if volume_info.get("language") != "en":
-                continue
-            seen_isbns.add(isbn)
-            image_links = volume_info.get("imageLinks", {})
-            published_date = volume_info.get("publishedDate", "")
-            year = int(published_date[:4]) if published_date and published_date[:4].isdigit() else None
-            results.append({
-                "title": volume_info.get("title"),
-                "author": volume_info.get("authors", [None])[0],
-                "isbn": isbn,
-                "cover": {
-                    "small": image_links.get("smallThumbnail"),
-                    "medium": image_links.get("thumbnail"),
-                    "large": image_links.get("large"),
-                },
-                "first_publish_year": year,
-            })
-
-        results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
-        return results[:limit]
-    except requests.RequestException:
-        return _search_open_library(query, limit)
+    results = _search_open_library(query, limit)
+    if results:
+        return results
+    return _search_google_books(query, limit)
 
 
 def _search_open_library(query: str, limit: int) -> list:
-    if _is_isbn(query):
-        details = get_book_details(query.replace("-", "").replace(" ", ""))
-        return [details] if details.get("title") else []
-    response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
-        "q": query,
-        "limit": limit,
-        "fields": "title,author_name,isbn,cover_i,first_publish_year",
-        "language": "eng",
-    }, timeout=10)
-    response.raise_for_status()
+    try:
+        if _is_isbn(query):
+            details = get_book_details(query.replace("-", "").replace(" ", ""))
+            return [details] if details.get("title") else []
+        response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
+            "q": query,
+            "limit": limit,
+            "fields": "title,author_name,isbn,cover_i,first_publish_year,language",
+            "language": "eng",
+        }, headers=OPEN_LIBRARY_HEADERS, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
     docs = response.json().get("docs", [])
 
     seen_isbns = set()
@@ -89,18 +57,70 @@ def _search_open_library(query: str, limit: int) -> list:
         })
 
     results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
-    return results
+    return results[:limit]
+
+
+def _search_google_books(query: str, limit: int) -> list:
+    try:
+        q = f"isbn:{query}" if _is_isbn(query) else query
+        params = {
+            "q": q,
+            "maxResults": 40,
+            "printType": "books",
+            "langRestrict": "en",
+        }
+        if GOOGLE_BOOKS_API_KEY:
+            params["key"] = GOOGLE_BOOKS_API_KEY
+        response = requests.get(GOOGLE_BOOKS_URL, params=params, timeout=10)
+        response.raise_for_status()
+        items = response.json().get("items", [])
+
+        seen_isbns = set()
+        results = []
+        for item in items:
+            volume_info = item.get("volumeInfo", {})
+            identifiers = volume_info.get("industryIdentifiers", [])
+            isbn = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), None)
+            if not isbn:
+                isbn = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_10"), None)
+            if not isbn or isbn in seen_isbns:
+                continue
+            if not volume_info.get("language", "").startswith("en"):
+                continue
+            seen_isbns.add(isbn)
+            image_links = volume_info.get("imageLinks", {})
+            published_date = volume_info.get("publishedDate", "")
+            year = int(published_date[:4]) if published_date and published_date[:4].isdigit() else None
+            results.append({
+                "title": volume_info.get("title"),
+                "author": volume_info.get("authors", [None])[0],
+                "isbn": isbn,
+                "cover": {
+                    "small": image_links.get("smallThumbnail"),
+                    "medium": image_links.get("thumbnail"),
+                    "large": image_links.get("large"),
+                },
+                "first_publish_year": year,
+            })
+
+        results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
+        return results[:limit]
+    except requests.RequestException:
+        return []
 
 
 def get_book_details(isbn: str) -> dict:
     bibkey = f"ISBN:{isbn}"
-    response = requests.get(OPEN_LIBRARY_BOOKS_URL, params={
-        "bibkeys": bibkey,
-        "jscmd": "data",
-        "format": "json",
-    })
-    response.raise_for_status()
-    data = response.json().get(bibkey, {})
+    try:
+        response = requests.get(OPEN_LIBRARY_BOOKS_URL, params={
+            "bibkeys": bibkey,
+            "jscmd": "data",
+            "format": "json",
+        }, headers=OPEN_LIBRARY_HEADERS, timeout=10)
+        response.raise_for_status()
+        data = response.json().get(bibkey, {})
+    except requests.RequestException:
+        data = {}
 
     covers = data.get("cover", {})
     google_data = _fetch_google_data(isbn)
@@ -126,7 +146,10 @@ def get_book_details(isbn: str) -> dict:
 
 def _fetch_google_data(isbn: str) -> dict:
     try:
-        response = requests.get(GOOGLE_BOOKS_URL, params={"q": f"isbn:{isbn}"}, timeout=5)
+        params = {"q": f"isbn:{isbn}"}
+        if GOOGLE_BOOKS_API_KEY:
+            params["key"] = GOOGLE_BOOKS_API_KEY
+        response = requests.get(GOOGLE_BOOKS_URL, params=params, timeout=5)
         response.raise_for_status()
         items = response.json().get("items", [])
         if items:
