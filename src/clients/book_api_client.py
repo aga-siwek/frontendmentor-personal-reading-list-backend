@@ -1,5 +1,6 @@
 import os
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 OPEN_LIBRARY_SEARCH_URL = "https://openlibrary.org/search.json"
@@ -9,6 +10,29 @@ GOOGLE_BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 
 OPEN_LIBRARY_HEADERS = {"User-Agent": "PersonalReadingList/1.0 (personal project)"}
 GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY")
+
+
+def _fetch_google_for_isbn(isbn: str) -> Optional[dict]:
+    try:
+        params = {"q": f"isbn:{isbn}", "maxResults": 1}
+        if GOOGLE_BOOKS_API_KEY:
+            params["key"] = GOOGLE_BOOKS_API_KEY
+        response = requests.get(GOOGLE_BOOKS_URL, params=params, timeout=5)
+        response.raise_for_status()
+        items = response.json().get("items", [])
+        if not items:
+            return None
+        vi = items[0]["volumeInfo"]
+        if not vi.get("pageCount", 0):
+            return None
+        thumbnail = vi.get("imageLinks", {}).get("thumbnail")
+        return {
+            "isbn": isbn,
+            "title": vi.get("title"),
+            "cover": {"small": None, "medium": thumbnail, "large": None},
+        }
+    except requests.RequestException:
+        return None
 
 
 def _is_isbn(query: str) -> bool:
@@ -30,7 +54,7 @@ def _search_open_library(query: str, limit: int) -> list:
             return [details] if details.get("title") else []
         response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
             "q": query,
-            "limit": limit,
+            "limit": limit * 3,
             "fields": "title,author_name,isbn,cover_i,first_publish_year,language",
             "language": "eng",
         }, headers=OPEN_LIBRARY_HEADERS, timeout=10)
@@ -40,21 +64,48 @@ def _search_open_library(query: str, limit: int) -> list:
     docs = response.json().get("docs", [])
 
     seen_isbns = set()
-    results = []
+    candidates = []
     for doc in docs:
-        isbns = doc.get("isbn", [])
-        isbn = next((i for i in isbns if len(i) == 13), isbns[0] if isbns else None)
-        if not isbn or isbn in seen_isbns:
+        languages = doc.get("language", [])
+        if languages and "eng" not in languages:
             continue
-        seen_isbns.add(isbn)
+        isbns = doc.get("isbn", [])
+        english_isbns = [i for i in isbns if len(i) == 13 and i.startswith(("9780", "9781"))]
+        fallback_isbn = next((i for i in isbns if len(i) == 13), isbns[0] if isbns else None)
+        ordered_isbns = english_isbns[:5] or ([fallback_isbn] if fallback_isbn else [])
+        new_isbns = [i for i in ordered_isbns if i not in seen_isbns]
+        if not new_isbns:
+            continue
         cover_i = doc.get("cover_i")
-        results.append({
+        candidates.append({
             "title": doc.get("title"),
             "author": doc.get("author_name", [None])[0],
-            "isbn": isbn,
+            "isbns": new_isbns,
             "cover": _build_covers(cover_i),
             "first_publish_year": doc.get("first_publish_year"),
         })
+
+    def _pick_valid(candidate: dict) -> Optional[dict]:
+        for isbn in candidate["isbns"]:
+            google = _fetch_google_for_isbn(isbn)
+            if google:
+                result = {**candidate, "isbn": isbn}
+                if google.get("title"):
+                    result["title"] = google["title"]
+                if google.get("cover", {}).get("medium"):
+                    result["cover"] = google["cover"]
+                return result
+        return None
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        validated = list(executor.map(_pick_valid, candidates))
+
+    results = []
+    seen_isbns = set()
+    for item in validated:
+        if item and item["isbn"] not in seen_isbns:
+            seen_isbns.add(item["isbn"])
+            results.append({k: v for k, v in item.items() if k != "isbns"})
 
     results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
     return results[:limit]
@@ -110,6 +161,52 @@ def _search_google_books(query: str, limit: int) -> list:
 
 
 def get_book_details(isbn: str) -> dict:
+    google_data = _fetch_google_book_details(isbn)
+    ol_data = _fetch_ol_book_details(isbn)
+    base = ol_data if ol_data.get("title") else google_data
+    if google_data.get("title"):
+        base["title"] = google_data["title"]
+    if google_data.get("cover", {}).get("medium"):
+        base["cover"] = google_data["cover"]
+    if google_data.get("description"):
+        base["description"] = google_data["description"]
+    if google_data.get("categories"):
+        base["categories"] = google_data["categories"]
+    return base
+
+
+def _fetch_google_book_details(isbn: str) -> dict:
+    try:
+        params = {"q": f"isbn:{isbn}"}
+        if GOOGLE_BOOKS_API_KEY:
+            params["key"] = GOOGLE_BOOKS_API_KEY
+        response = requests.get(GOOGLE_BOOKS_URL, params=params, timeout=5)
+        response.raise_for_status()
+        items = response.json().get("items", [])
+        if not items:
+            return {}
+        vi = items[0].get("volumeInfo", {})
+        identifiers = vi.get("industryIdentifiers", [])
+        isbn13 = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), isbn)
+        authors = vi.get("authors", [])
+        thumbnail = vi.get("imageLinks", {}).get("thumbnail")
+        return {
+            "isbn": isbn13,
+            "title": vi.get("title"),
+            "author": authors[0] if authors else None,
+            "cover": {"small": None, "medium": thumbnail, "large": None},
+            "description": vi.get("description"),
+            "categories": vi.get("categories", []),
+            "number_of_pages": vi.get("pageCount"),
+            "publish_date": vi.get("publishedDate"),
+            "publisher": vi.get("publisher"),
+            "source_api_id": None,
+        }
+    except requests.RequestException:
+        return {}
+
+
+def _fetch_ol_book_details(isbn: str) -> dict:
     bibkey = f"ISBN:{isbn}"
     try:
         response = requests.get(OPEN_LIBRARY_BOOKS_URL, params={
@@ -122,45 +219,22 @@ def get_book_details(isbn: str) -> dict:
     except requests.RequestException:
         data = {}
 
-    covers = data.get("cover", {})
-    google_data = _fetch_google_data(isbn)
     authors = data.get("authors", [])
     publishers = data.get("publishers", [])
+    cover = data.get("cover", {}).get("medium")
+    subjects = [s["name"] for s in data.get("subjects", []) if s.get("name", "").isascii()][:5]
     return {
         "isbn": isbn,
         "title": data.get("title"),
         "author": authors[0]["name"] if authors else None,
-        "cover": {
-            "small": covers.get("small"),
-            "medium": covers.get("medium"),
-            "large": covers.get("large"),
-        },
-        "description": google_data["description"],
-        "categories": google_data["categories"],
+        "cover": {"small": None, "medium": cover, "large": None},
+        "description": None,
+        "categories": subjects,
         "number_of_pages": data.get("number_of_pages"),
         "publish_date": data.get("publish_date"),
         "publisher": publishers[0]["name"] if publishers else None,
         "source_api_id": data.get("key"),
     }
-
-
-def _fetch_google_data(isbn: str) -> dict:
-    try:
-        params = {"q": f"isbn:{isbn}"}
-        if GOOGLE_BOOKS_API_KEY:
-            params["key"] = GOOGLE_BOOKS_API_KEY
-        response = requests.get(GOOGLE_BOOKS_URL, params=params, timeout=5)
-        response.raise_for_status()
-        items = response.json().get("items", [])
-        if items:
-            volume_info = items[0].get("volumeInfo", {})
-            return {
-                "description": volume_info.get("description"),
-                "categories": volume_info.get("categories", []),
-            }
-    except requests.RequestException:
-        pass
-    return {"description": None, "categories": []}
 
 
 def _build_covers(cover_i: Optional[int]) -> dict:
