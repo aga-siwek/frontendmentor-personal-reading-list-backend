@@ -21,7 +21,7 @@ def _fetch_google_for_isbn(isbn: str) -> Optional[dict]:
         response.raise_for_status()
         items = response.json().get("items", [])
         if not items:
-            return None
+            return {}
         vi = items[0]["volumeInfo"]
         if not vi.get("pageCount", 0):
             return None
@@ -32,7 +32,7 @@ def _fetch_google_for_isbn(isbn: str) -> Optional[dict]:
             "cover": {"small": None, "medium": thumbnail, "large": None},
         }
     except requests.RequestException:
-        return None
+        return {}
 
 
 def _is_isbn(query: str) -> bool:
@@ -54,7 +54,7 @@ def _search_open_library(query: str, limit: int) -> list:
             return [details] if details.get("title") else []
         response = requests.get(OPEN_LIBRARY_SEARCH_URL, params={
             "q": query,
-            "limit": limit * 3,
+            "limit": limit * 2,
             "fields": "title,author_name,isbn,cover_i,first_publish_year,language",
             "language": "eng",
         }, headers=OPEN_LIBRARY_HEADERS, timeout=10)
@@ -70,7 +70,7 @@ def _search_open_library(query: str, limit: int) -> list:
         if languages and "eng" not in languages:
             continue
         isbns = doc.get("isbn", [])
-        english_isbns = [i for i in isbns if len(i) == 13 and i.startswith(("9780", "9781"))]
+        english_isbns = [i for i in isbns if len(i) == 13 and i.startswith(("9780", "9781"))][:2]
         fallback_isbn = next((i for i in isbns if len(i) == 13), isbns[0] if isbns else None)
         ordered_isbns = english_isbns[:5] or ([fallback_isbn] if fallback_isbn else [])
         new_isbns = [i for i in ordered_isbns if i not in seen_isbns]
@@ -88,7 +88,7 @@ def _search_open_library(query: str, limit: int) -> list:
     def _pick_valid(candidate: dict) -> Optional[dict]:
         for isbn in candidate["isbns"]:
             google = _fetch_google_for_isbn(isbn)
-            if google:
+            if google is not None:
                 result = {**candidate, "isbn": isbn}
                 if google.get("title"):
                     result["title"] = google["title"]
@@ -97,7 +97,7 @@ def _search_open_library(query: str, limit: int) -> list:
                 return result
         return None
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         validated = list(executor.map(_pick_valid, candidates))
 
     results = []
