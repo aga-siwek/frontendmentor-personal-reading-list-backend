@@ -83,20 +83,21 @@ def test_search_returns_empty_on_api_error():
     assert results == []
 
 
-def test_search_skips_non_english_results():
+def test_search_includes_non_english_results():
     non_english_item = {
         "volumeInfo": {
-            "title": "Harry Potter (PL)",
+            "title": "Harry Potter i Kamień Filozoficzny",
             "authors": ["J.K. Rowling"],
             "language": "pl",
-            "publishedDate": "1997",
+            "publishedDate": "2000",
             "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9788380082625"}],
         }
     }
     with patch("src.clients.book_api_client.requests.get") as mock_get:
         mock_get.return_value = _make_mock_response({"items": [non_english_item]})
         results = search_books("harry potter")
-    assert results == []
+    assert len(results) == 1
+    assert results[0]["isbn"] == "9788380082625"
 
 
 def test_get_book_details_returns_full_data():

@@ -22,7 +22,7 @@ def search_books(query: str, limit: int = 8) -> list:
     try:
         response = requests.get(
             GOOGLE_BOOKS_URL,
-            params=_google_params({"q": q, "maxResults": 40, "printType": "books", "langRestrict": "en"}),
+            params=_google_params({"q": q, "maxResults": 40, "printType": "books"}),
             timeout=10,
         )
         response.raise_for_status()
@@ -34,8 +34,6 @@ def search_books(query: str, limit: int = 8) -> list:
     results = []
     for item in items:
         vi = item.get("volumeInfo", {})
-        if not vi.get("language", "").startswith("en"):
-            continue
         identifiers = vi.get("industryIdentifiers", [])
         isbn = next((i["identifier"] for i in identifiers if i["type"] == "ISBN_13"), None)
         if not isbn:
