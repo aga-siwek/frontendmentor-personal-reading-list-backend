@@ -8,7 +8,8 @@ GOOGLE_BOOK_ITEM = {
         "authors": ["J.K. Rowling"],
         "language": "en",
         "publishedDate": "1997",
-        "imageLinks": {"smallThumbnail": "small.jpg", "thumbnail": "medium.jpg"},
+        "pageCount": 223,
+        "imageLinks": {"smallThumbnail": "http://books.google.com/small.jpg", "thumbnail": "http://books.google.com/medium.jpg"},
         "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9780747562184"}],
     }
 }
@@ -66,6 +67,33 @@ def test_search_returns_results():
     assert results[0]["isbn"] == "9780747562184"
     assert results[0]["author"] == "J.K. Rowling"
     assert results[0]["first_publish_year"] == 1997
+    assert results[0]["cover"]["medium"] == "https://books.google.com/medium.jpg"
+
+
+def test_search_prefers_results_with_cover_and_pages():
+    item_no_cover = {
+        "volumeInfo": {
+            "title": "Harry Potter (old edition)",
+            "authors": ["J.K. Rowling"],
+            "publishedDate": "2020",
+            "pageCount": 0,
+            "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9780000000001"}],
+        }
+    }
+    item_with_cover = {
+        "volumeInfo": {
+            "title": "Harry Potter (new edition)",
+            "authors": ["J.K. Rowling"],
+            "publishedDate": "2010",
+            "pageCount": 223,
+            "imageLinks": {"thumbnail": "http://books.google.com/cover.jpg"},
+            "industryIdentifiers": [{"type": "ISBN_13", "identifier": "9780000000002"}],
+        }
+    }
+    with patch("src.clients.book_api_client.requests.get") as mock_get:
+        mock_get.return_value = _make_mock_response({"items": [item_no_cover, item_with_cover]})
+        results = search_books("harry potter")
+    assert results[0]["isbn"] == "9780000000002"
 
 
 def test_search_isbn_uses_isbn_prefix():

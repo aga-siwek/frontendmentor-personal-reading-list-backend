@@ -10,6 +10,12 @@ def _is_isbn(query: str) -> bool:
     return stripped.isdigit() and len(stripped) in (10, 13)
 
 
+def _https(url):
+    if url and url.startswith("http://"):
+        return "https://" + url[7:]
+    return url
+
+
 def _google_params(extra: dict) -> dict:
     params = {**extra}
     if GOOGLE_BOOKS_API_KEY:
@@ -44,20 +50,25 @@ def search_books(query: str, limit: int = 8) -> list:
         image_links = vi.get("imageLinks", {})
         published_date = vi.get("publishedDate", "")
         year = int(published_date[:4]) if published_date and published_date[:4].isdigit() else None
+        thumbnail = _https(image_links.get("thumbnail"))
         results.append({
             "title": vi.get("title"),
             "author": vi.get("authors", [None])[0],
             "isbn": isbn,
             "cover": {
-                "small": image_links.get("smallThumbnail"),
-                "medium": image_links.get("thumbnail"),
-                "large": image_links.get("large"),
+                "small": _https(image_links.get("smallThumbnail")),
+                "medium": thumbnail,
+                "large": _https(image_links.get("large")),
             },
             "first_publish_year": year,
+            "page_count": vi.get("pageCount") or 0,
         })
 
-    results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
-    return results[:limit]
+    results.sort(key=lambda x: (
+        bool(x["cover"]["medium"]) and x["page_count"] > 0,
+        x["first_publish_year"] or 0,
+    ), reverse=True)
+    return [{k: v for k, v in r.items() if k != "page_count"} for r in results[:limit]]
 
 
 def get_book_details(isbn: str) -> dict:
@@ -84,9 +95,9 @@ def get_book_details(isbn: str) -> dict:
         "title": vi.get("title"),
         "author": authors[0] if authors else None,
         "cover": {
-            "small": image_links.get("smallThumbnail"),
-            "medium": image_links.get("thumbnail"),
-            "large": image_links.get("large"),
+            "small": _https(image_links.get("smallThumbnail")),
+            "medium": _https(image_links.get("thumbnail")),
+            "large": _https(image_links.get("large")),
         },
         "description": vi.get("description"),
         "categories": vi.get("categories", []),
