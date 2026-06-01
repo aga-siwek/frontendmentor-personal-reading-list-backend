@@ -29,7 +29,7 @@ OPEN_LIBRARY_BOOK_DATA = {
         "publishers": [{"name": "Bloomsbury"}],
         "number_of_pages": 223,
         "publish_date": "1997",
-        "cover": {"small": "small.jpg", "medium": "medium.jpg", "large": "large.jpg"},
+        "cover": {"small": "https://covers.openlibrary.org/b/id/123-S.jpg", "medium": "https://covers.openlibrary.org/b/id/123-M.jpg", "large": "https://covers.openlibrary.org/b/id/123-L.jpg"},
         "key": "/works/OL82563W",
     }
 }
@@ -127,10 +127,11 @@ def test_get_book_details_combines_sources():
             _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
         ]
         result = get_book_details("9780747562184")
-    assert result["title"] == "Harry Potter and the Philosopher's Stone"
-    assert result["description"] == "A young wizard's story"
-    assert result["categories"] == ["Fiction"]
-    assert result["number_of_pages"] == 223
+    assert result["title"] == "Harry Potter and the Philosopher's Stone"  # from OL
+    assert result["description"] == "A young wizard's story"              # from Google
+    assert result["categories"] == ["Fiction"]                            # from Google
+    assert result["number_of_pages"] == 223                               # from OL
+    assert result["publisher"] == "Bloomsbury"                            # from OL
 
 
 def test_get_book_details_cover_uses_https():

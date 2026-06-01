@@ -159,9 +159,7 @@ def get_book_details(isbn: str) -> dict:
     google_data = _fetch_google_book_details(isbn)
     ol_data = _fetch_ol_book_details(isbn)
     base = ol_data if ol_data.get("title") else google_data
-    if google_data.get("title"):
-        base["title"] = google_data["title"]
-    if google_data.get("cover", {}).get("medium"):
+    if not base.get("cover", {}).get("medium") and google_data.get("cover", {}).get("medium"):
         base["cover"] = google_data["cover"]
     if google_data.get("description"):
         base["description"] = google_data["description"]
