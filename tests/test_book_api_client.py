@@ -1,5 +1,6 @@
 import requests
 from unittest.mock import patch, MagicMock
+from src.clients import book_api_client
 from src.clients.book_api_client import search_books, get_book_details, _is_isbn
 
 GOOGLE_BOOK_ITEM = {
@@ -20,6 +21,10 @@ OPEN_LIBRARY_DOC = {
     "isbn": ["9780747562184"],
     "cover_i": 12345,
     "first_publish_year": 1997,
+}
+
+OPEN_LIBRARY_PAGE_COUNT_DATA = {
+    "ISBN:9780747562184": {"number_of_pages": 223},
 }
 
 OPEN_LIBRARY_BOOK_DATA = {
@@ -58,6 +63,27 @@ def _make_mock_response(json_data):
     return mock
 
 
+def _fake_get_by_url(by_url):
+    """SESSION.get replacement that answers based on the request URL.
+
+    Search now makes a batched Open Library call plus parallel Google Books
+    calls, so the call order isn't guaranteed - routing by URL instead of by
+    call order keeps the tests correct regardless of execution order.
+    """
+    def fake_get(url, params=None, headers=None, timeout=None):
+        if url not in by_url:
+            raise AssertionError(f"Unexpected request to {url} with params {params}")
+        response = by_url[url]
+        if isinstance(response, Exception):
+            raise response
+        return response
+    return fake_get
+
+
+def setup_function(_):
+    book_api_client._search_cache.clear()
+
+
 def test_is_isbn_13_digits():
     assert _is_isbn("9780747562184") == True
 
@@ -79,10 +105,12 @@ def test_is_isbn_wrong_length():
 
 
 def test_search_returns_open_library_results():
-    ol_response = _make_mock_response({"docs": [OPEN_LIBRARY_DOC]})
-    google_response = _make_mock_response({"items": [GOOGLE_BOOK_ITEM]})
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
-        mock_get.side_effect = [ol_response, google_response]
+    by_url = {
+        book_api_client.OPEN_LIBRARY_SEARCH_URL: _make_mock_response({"docs": [OPEN_LIBRARY_DOC]}),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response(OPEN_LIBRARY_PAGE_COUNT_DATA),
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response({"items": [GOOGLE_BOOK_ITEM]}),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
         results = search_books("harry potter")
     assert len(results) == 1
     assert results[0]["title"] == "Harry Potter"
@@ -90,16 +118,31 @@ def test_search_returns_open_library_results():
 
 
 def test_search_cover_url_uses_https():
-    ol_response = _make_mock_response({"docs": [OPEN_LIBRARY_DOC]})
-    google_response = _make_mock_response({"items": [GOOGLE_BOOK_ITEM]})
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
-        mock_get.side_effect = [ol_response, google_response]
+    by_url = {
+        book_api_client.OPEN_LIBRARY_SEARCH_URL: _make_mock_response({"docs": [OPEN_LIBRARY_DOC]}),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response(OPEN_LIBRARY_PAGE_COUNT_DATA),
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response({"items": [GOOGLE_BOOK_ITEM]}),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
         results = search_books("harry potter")
     assert results[0]["cover"]["medium"].startswith("https://")
 
 
+def test_search_skips_editions_without_page_count():
+    # No edition has a page count, so Open Library yields no candidates and
+    # search falls back to Google Books - which also returns nothing here.
+    by_url = {
+        book_api_client.OPEN_LIBRARY_SEARCH_URL: _make_mock_response({"docs": [OPEN_LIBRARY_DOC]}),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response({"ISBN:9780747562184": {"number_of_pages": 0}}),
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response({"items": []}),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
+        results = search_books("harry potter")
+    assert results == []
+
+
 def test_search_falls_back_to_google_books():
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
+    with patch.object(book_api_client.SESSION, "get") as mock_get:
         mock_get.side_effect = [
             requests.RequestException("OL down"),
             _make_mock_response({"items": [GOOGLE_BOOK_ITEM]}),
@@ -110,22 +153,22 @@ def test_search_falls_back_to_google_books():
 
 
 def test_search_isbn_query_uses_isbn_prefix():
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
-        mock_get.side_effect = [
-            _make_mock_response(GOOGLE_DESCRIPTION_DATA),
-            _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
-        ]
+    by_url = {
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response(GOOGLE_DESCRIPTION_DATA),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)) as mock_get:
         search_books("9780747562184")
-    google_call = mock_get.call_args_list[0]
-    assert google_call[1]["params"]["q"] == "isbn:9780747562184"
+    google_calls = [c for c in mock_get.call_args_list if c.args[0] == book_api_client.GOOGLE_BOOKS_URL]
+    assert google_calls[0].kwargs["params"]["q"] == "isbn:9780747562184"
 
 
 def test_get_book_details_combines_sources():
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
-        mock_get.side_effect = [
-            _make_mock_response(GOOGLE_DESCRIPTION_DATA),
-            _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
-        ]
+    by_url = {
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response(GOOGLE_DESCRIPTION_DATA),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
         result = get_book_details("9780747562184")
     assert result["title"] == "Harry Potter and the Philosopher's Stone"  # from OL
     assert result["description"] == "A young wizard's story"              # from Google
@@ -135,21 +178,21 @@ def test_get_book_details_combines_sources():
 
 
 def test_get_book_details_cover_uses_https():
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
-        mock_get.side_effect = [
-            _make_mock_response(GOOGLE_DESCRIPTION_DATA),
-            _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
-        ]
+    by_url = {
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response(GOOGLE_DESCRIPTION_DATA),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
         result = get_book_details("9780747562184")
     assert result["cover"]["medium"].startswith("https://")
 
 
 def test_get_book_details_google_fails_gracefully():
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
-        mock_get.side_effect = [
-            requests.RequestException("Google down"),
-            _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
-        ]
+    by_url = {
+        book_api_client.GOOGLE_BOOKS_URL: requests.RequestException("Google down"),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response(OPEN_LIBRARY_BOOK_DATA),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
         result = get_book_details("9780747562184")
     assert result["title"] == "Harry Potter and the Philosopher's Stone"
     assert result["description"] is None
@@ -157,10 +200,24 @@ def test_get_book_details_google_fails_gracefully():
 
 
 def test_get_book_details_open_library_not_found():
-    with patch("src.clients.book_api_client.requests.get") as mock_get:
-        mock_get.side_effect = [
-            _make_mock_response(GOOGLE_DESCRIPTION_DATA),
-            _make_mock_response({}),
-        ]
+    by_url = {
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response(GOOGLE_DESCRIPTION_DATA),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response({}),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
         result = get_book_details("9780000000000")
     assert result["title"] == "Harry Potter and the Philosopher's Stone"
+
+
+def test_search_uses_cache_for_repeated_query():
+    by_url = {
+        book_api_client.OPEN_LIBRARY_SEARCH_URL: _make_mock_response({"docs": [OPEN_LIBRARY_DOC]}),
+        book_api_client.OPEN_LIBRARY_BOOKS_URL: _make_mock_response(OPEN_LIBRARY_PAGE_COUNT_DATA),
+        book_api_client.GOOGLE_BOOKS_URL: _make_mock_response({"items": [GOOGLE_BOOK_ITEM]}),
+    }
+    with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)) as mock_get:
+        first = search_books("harry potter")
+        call_count_after_first = mock_get.call_count
+        second = search_books("harry potter")
+    assert first == second
+    assert mock_get.call_count == call_count_after_first
