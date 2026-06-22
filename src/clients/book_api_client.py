@@ -96,7 +96,7 @@ def _search_open_library(query: str, limit: int) -> list:
             return [details] if details.get("title") else []
         response = SESSION.get(OPEN_LIBRARY_SEARCH_URL, params={
             "q": query,
-            "limit": limit * 2,
+            "limit": limit + 6,
             "fields": "title,author_name,isbn,cover_i,first_publish_year",
         }, headers=OPEN_LIBRARY_HEADERS, timeout=10)
         response.raise_for_status()
@@ -127,7 +127,19 @@ def _search_open_library(query: str, limit: int) -> list:
     # Single batched request instead of asking Google Books, ISBN by ISBN,
     # whether each edition has a page count.
     all_isbns = [isbn for candidate in candidates for isbn in candidate["isbns"]]
-    page_counts = _fetch_page_counts(all_isbns)
+
+    # The page-count check (Open Library) doesn't depend on the cover/title
+    # lookup (Google Books), so run them at the same time instead of waiting
+    # for one to finish before starting the other. We don't know yet which
+    # ISBN each candidate will end up using, so we prefetch Google data for
+    # the most likely one (its first, preference-ordered ISBN) - the rare
+    # case where that guess turns out invalid falls back to an extra request.
+    best_guess_isbns = {candidate["isbns"][0] for candidate in candidates}
+    with ThreadPoolExecutor(max_workers=min(len(best_guess_isbns), 8) + 1) as executor:
+        page_counts_future = executor.submit(_fetch_page_counts, all_isbns)
+        google_futures = {isbn: executor.submit(_fetch_google_for_isbn, isbn) for isbn in best_guess_isbns}
+        page_counts = page_counts_future.result()
+        google_by_isbn = {isbn: future.result() for isbn, future in google_futures.items()}
 
     chosen = []
     for candidate in candidates:
@@ -136,7 +148,8 @@ def _search_open_library(query: str, limit: int) -> list:
             chosen.append({**candidate, "isbn": isbn})
 
     def _enrich_with_google(candidate: dict) -> dict:
-        google = _fetch_google_for_isbn(candidate["isbn"])
+        isbn = candidate["isbn"]
+        google = google_by_isbn[isbn] if isbn in google_by_isbn else _fetch_google_for_isbn(isbn)
         if google.get("title"):
             candidate["title"] = google["title"]
         if google.get("cover", {}).get("medium"):

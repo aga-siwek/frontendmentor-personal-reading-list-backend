@@ -141,6 +141,35 @@ def test_search_skips_editions_without_page_count():
     assert results == []
 
 
+def test_search_falls_back_to_second_isbn_when_best_guess_is_invalid():
+    # Candidate has two ISBNs; the first (the "best guess" prefetched
+    # alongside the page-count check) has no page count, so search must
+    # fall back to the second one and fetch Google data for it specifically.
+    doc = {**OPEN_LIBRARY_DOC, "isbn": ["9780000000001", "9780747562184"]}
+    page_counts = {
+        "ISBN:9780000000001": {"number_of_pages": 0},
+        "ISBN:9780747562184": {"number_of_pages": 223},
+    }
+    google_queries = []
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        if url == book_api_client.OPEN_LIBRARY_SEARCH_URL:
+            return _make_mock_response({"docs": [doc]})
+        if url == book_api_client.OPEN_LIBRARY_BOOKS_URL:
+            return _make_mock_response(page_counts)
+        if url == book_api_client.GOOGLE_BOOKS_URL:
+            google_queries.append(params["q"])
+            return _make_mock_response({"items": [GOOGLE_BOOK_ITEM]})
+        raise AssertionError(f"Unexpected request to {url} with params {params}")
+
+    with patch.object(book_api_client.SESSION, "get", side_effect=fake_get):
+        results = search_books("harry potter")
+
+    assert results[0]["isbn"] == "9780747562184"
+    assert "isbn:9780000000001" in google_queries  # prefetch for the invalid best guess
+    assert "isbn:9780747562184" in google_queries  # fallback fetch for the real chosen isbn
+
+
 def test_search_falls_back_to_google_books():
     with patch.object(book_api_client.SESSION, "get") as mock_get:
         mock_get.side_effect = [
