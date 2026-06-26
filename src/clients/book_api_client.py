@@ -89,21 +89,9 @@ def _fetch_google_for_isbn(isbn: str) -> dict:
         return {}
 
 
-def _search_open_library(query: str, limit: int) -> list:
-    try:
-        if _is_isbn(query):
-            details = get_book_details(query.replace("-", "").replace(" ", ""))
-            return [details] if details.get("title") else []
-        response = SESSION.get(OPEN_LIBRARY_SEARCH_URL, params={
-            "q": query,
-            "limit": limit + 6,
-            "fields": "title,author_name,isbn,cover_i,first_publish_year",
-        }, headers=OPEN_LIBRARY_HEADERS, timeout=10)
-        response.raise_for_status()
-    except requests.RequestException:
-        return []
-    docs = response.json().get("docs", [])
-
+def _build_candidates(docs: list) -> list:
+    """Turns raw Open Library search hits into candidates, each carrying its
+    ISBNs ordered by preference (English editions first)."""
     candidates = []
     for doc in docs:
         isbns = doc.get("isbn", [])
@@ -120,54 +108,89 @@ def _search_open_library(query: str, limit: int) -> list:
             "cover": _build_covers(cover_i),
             "first_publish_year": doc.get("first_publish_year"),
         })
+    return candidates
 
-    if not candidates:
-        return []
 
-    # Single batched request instead of asking Google Books, ISBN by ISBN,
-    # whether each edition has a page count.
+def _fetch_validation_and_cover_data(candidates: list) -> tuple:
+    """Runs the Open Library page-count check (one batched request, for
+    every candidate ISBN) and a Google Books cover/title prefetch (for each
+    candidate's most likely ISBN) at the same time, since neither depends on
+    the other's result."""
     all_isbns = [isbn for candidate in candidates for isbn in candidate["isbns"]]
-
-    # The page-count check (Open Library) doesn't depend on the cover/title
-    # lookup (Google Books), so run them at the same time instead of waiting
-    # for one to finish before starting the other. We don't know yet which
-    # ISBN each candidate will end up using, so we prefetch Google data for
-    # the most likely one (its first, preference-ordered ISBN) - the rare
-    # case where that guess turns out invalid falls back to an extra request.
     best_guess_isbns = {candidate["isbns"][0] for candidate in candidates}
     with ThreadPoolExecutor(max_workers=min(len(best_guess_isbns), 8) + 1) as executor:
         page_counts_future = executor.submit(_fetch_page_counts, all_isbns)
         google_futures = {isbn: executor.submit(_fetch_google_for_isbn, isbn) for isbn in best_guess_isbns}
         page_counts = page_counts_future.result()
         google_by_isbn = {isbn: future.result() for isbn, future in google_futures.items()}
+    return page_counts, google_by_isbn
 
+
+def _choose_isbn_for_candidates(candidates: list, page_counts: dict) -> list:
+    """Keeps only candidates with at least one ISBN that has a page count,
+    picking the first valid one in preference order."""
     chosen = []
     for candidate in candidates:
         isbn = next((i for i in candidate["isbns"] if page_counts.get(i, 0) > 0), None)
         if isbn:
             chosen.append({**candidate, "isbn": isbn})
+    return chosen
 
-    def _enrich_with_google(candidate: dict) -> dict:
-        isbn = candidate["isbn"]
-        google = google_by_isbn[isbn] if isbn in google_by_isbn else _fetch_google_for_isbn(isbn)
-        if google.get("title"):
-            candidate["title"] = google["title"]
-        if google.get("cover", {}).get("medium"):
-            candidate["cover"] = google["cover"]
-        return candidate
+
+def _add_google_data(candidate: dict, google_by_isbn: dict) -> dict:
+    isbn = candidate["isbn"]
+    # Reuse the prefetched Google data when the chosen ISBN was our best
+    # guess; only the rare fallback ISBN needs an extra request here.
+    google = google_by_isbn[isbn] if isbn in google_by_isbn else _fetch_google_for_isbn(isbn)
+    if google.get("title"):
+        candidate["title"] = google["title"]
+    if google.get("cover", {}).get("medium"):
+        candidate["cover"] = google["cover"]
+    return candidate
+
+
+def _add_google_data_to_candidates(chosen: list, google_by_isbn: dict) -> list:
+    def add_google_data(candidate):
+        return _add_google_data(candidate, google_by_isbn)
 
     with ThreadPoolExecutor(max_workers=8) as executor:
-        enriched = list(executor.map(_enrich_with_google, chosen))
+        return list(executor.map(add_google_data, chosen))
 
+
+def _dedupe_and_sort(items: list, limit: int) -> list:
     results = []
     seen_isbns = set()
-    for item in enriched:
+    for item in items:
         if item["isbn"] not in seen_isbns:
             seen_isbns.add(item["isbn"])
             results.append({k: v for k, v in item.items() if k != "isbns"})
-
     results.sort(key=lambda x: x["first_publish_year"] or 0, reverse=True)
     return results[:limit]
+
+
+def _search_open_library(query: str, limit: int) -> list:
+    try:
+        if _is_isbn(query):
+            details = get_book_details(query.replace("-", "").replace(" ", ""))
+            return [details] if details.get("title") else []
+        response = SESSION.get(OPEN_LIBRARY_SEARCH_URL, params={
+            "q": query,
+            "limit": limit + 6,
+            "fields": "title,author_name,isbn,cover_i,first_publish_year",
+        }, headers=OPEN_LIBRARY_HEADERS, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
+    docs = response.json().get("docs", [])
+
+    candidates = _build_candidates(docs)
+    if not candidates:
+        return []
+
+    page_counts, google_by_isbn = _fetch_validation_and_cover_data(candidates)
+    chosen = _choose_isbn_for_candidates(candidates, page_counts)
+    with_google_data = _add_google_data_to_candidates(chosen, google_by_isbn)
+    return _dedupe_and_sort(with_google_data, limit)
 
 
 def _search_google_books(query: str, limit: int) -> list:
@@ -217,11 +240,11 @@ def get_book_details(isbn: str) -> dict:
     # concurrently instead of waiting on one before starting the other.
     with ThreadPoolExecutor(max_workers=2) as executor:
         google_future = executor.submit(_fetch_google_book_details, isbn)
-        ol_future = executor.submit(_fetch_ol_book_details, isbn)
+        open_library_future = executor.submit(_fetch_open_library_book_details, isbn)
         google_data = google_future.result()
-        ol_data = ol_future.result()
+        open_library_data = open_library_future.result()
 
-    base = ol_data if ol_data.get("title") else google_data
+    base = open_library_data if open_library_data.get("title") else google_data
     if not base.get("cover", {}).get("medium") and google_data.get("cover", {}).get("medium"):
         base["cover"] = google_data["cover"]
     if google_data.get("description"):
@@ -266,7 +289,7 @@ def _fetch_google_book_details(isbn: str) -> dict:
         return {}
 
 
-def _fetch_ol_book_details(isbn: str) -> dict:
+def _fetch_open_library_book_details(isbn: str) -> dict:
     bibkey = f"ISBN:{isbn}"
     try:
         response = SESSION.get(OPEN_LIBRARY_BOOKS_URL, params={

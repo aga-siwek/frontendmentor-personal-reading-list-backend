@@ -173,7 +173,7 @@ def test_search_falls_back_to_second_isbn_when_best_guess_is_invalid():
 def test_search_falls_back_to_google_books():
     with patch.object(book_api_client.SESSION, "get") as mock_get:
         mock_get.side_effect = [
-            requests.RequestException("OL down"),
+            requests.RequestException("Open Library down"),
             _make_mock_response({"items": [GOOGLE_BOOK_ITEM]}),
         ]
         results = search_books("harry potter")
@@ -199,11 +199,11 @@ def test_get_book_details_combines_sources():
     }
     with patch.object(book_api_client.SESSION, "get", side_effect=_fake_get_by_url(by_url)):
         result = get_book_details("9780747562184")
-    assert result["title"] == "Harry Potter and the Philosopher's Stone"  # from OL
+    assert result["title"] == "Harry Potter and the Philosopher's Stone"  # from Open Library
     assert result["description"] == "A young wizard's story"              # from Google
     assert result["categories"] == ["Fiction"]                            # from Google
-    assert result["number_of_pages"] == 223                               # from OL
-    assert result["publisher"] == "Bloomsbury"                            # from OL
+    assert result["number_of_pages"] == 223                               # from Open Library
+    assert result["publisher"] == "Bloomsbury"                            # from Open Library
 
 
 def test_get_book_details_cover_uses_https():
